@@ -69,6 +69,5 @@ end
 
 if  __FILE__ == $0
   include RailsGoodies::MySql
-  puts produce_command_line(ARGV)
   exec produce_command_line(ARGV)
 end
