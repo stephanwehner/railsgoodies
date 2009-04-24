@@ -74,6 +74,7 @@ end
 if  __FILE__ == $0
   include RailsGoodies::MySql
   # Default options:
+  options = {}
   option_parser = OptionParser.new do |opts|
     opts.banner = "Usage: #{$0} [options] [environment] [database.yml]"
 
