@@ -36,7 +36,10 @@ other:
   def test_no_args
     IO.expects(:read).returns(GOOD_DATABASE_YML)
     expected = <<-END
-{ printf '[client]\nuser=%s\\nhost=%s\\ndatabase=%s\\npassword=%s' dev_user localhost dev_db dev_password |\n3<&0 <&4 4<&- /usr/local/mysql/bin/mysql --defaults-file=/dev/fd/3 \n} 4<&0
+{ printf '[client]
+database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'dev_db' 'localhost' 'dev_password' 'dev_user' |
+3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
+} 4<&0
     END
     assert_equal expected.strip,  produce_command_line.strip
   end
@@ -47,7 +50,10 @@ other:
     # "defaults-file" -- Otherwise other options would be shifted up...
     IO.expects(:read).returns(GOOD_DATABASE_YML.sub(/password: dev_password/,'password:'))
     expected = <<-END
-{ printf '[client]\nuser=%s\\nhost=%s\\ndatabase=%s\\npassword=%s' dev_user localhost dev_db  |\n3<&0 <&4 4<&- /usr/local/mysql/bin/mysql --defaults-file=/dev/fd/3 \n} 4<&0
+{ printf '[client]
+database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'dev_db' 'localhost' '' 'dev_user' |
+3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
+} 4<&0
     END
     assert_equal expected.strip,  produce_command_line.strip
   end
@@ -58,7 +64,10 @@ other:
     # "defaults-file" -- Otherwise other options would be shifted up...
     IO.expects(:read).returns(GOOD_DATABASE_YML)
     expected = <<-END
-{ printf '[client]\nuser=%s\\nhost=%s\\ndatabase=%s\\npassword=%s' other_user localhost other_db other_password |\n3<&0 <&4 4<&- /usr/local/mysql/bin/mysql --defaults-file=/dev/fd/3 \n} 4<&0
+{ printf '[client]
+database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'other_db' 'localhost' 'other_password' 'other_user' |
+3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
+} 4<&0
     END
     assert_equal expected.strip,  produce_command_line(['other']).strip
   end

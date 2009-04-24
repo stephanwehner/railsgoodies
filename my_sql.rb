@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require 'optparse'
 require 'yaml'
 require 'erb'
 
@@ -30,7 +31,8 @@ require 'erb'
 
 module RailsGoodies
   module MySql
-    def produce_command_line(argv = [])
+    def produce_command_line(argv = [], options = {})
+      options[:mysql_bin] ||= 'mysql' # default
       argv = [] if argv.nil?
       environment = argv[0] || 'development'
       config_file = argv[1] || 'config/database.yml'
@@ -48,26 +50,47 @@ module RailsGoodies
       if config['user'].nil? && (config['user'] = config['username'])
         config.delete 'username'
       end
-      connection_opt = config.keys
-      if config.keys.include? 'password'
-        connection_opt.delete_if { |opt|  opt=='password'}
-        connection_opt << 'password'
-      end
+      connection_opt = config.keys.sort
       
-      connection_values = connection_opt.collect { |key| config[key]}
+      connection_values = connection_opt.collect { |key| "'#{config[key]}'"}
       connection_opt.map! { |key| "#{ key }=%s"}
 
       # After http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
-      return <<-END_BASH
+      command_line = <<-END_BASH
       { printf '[client]\n#{connection_opt.join('\n')}' #{connection_values.join(' ')} |
-3<&0 <&4 4<&- /usr/local/mysql/bin/mysql --defaults-file=/dev/fd/3 
+3<&0 <&4 4<&- #{options[:mysql_bin]} --defaults-file=/dev/fd/3 
 } 4<&0
        END_BASH
+       $stderr.puts command_line if options[:verbose]
+       command_line
     end
   end
 end
 
 if  __FILE__ == $0
   include RailsGoodies::MySql
-  exec produce_command_line(ARGV)
+  # Default options:
+  options = {:mysql_bin => 'mysql'}
+  option_parser = OptionParser.new do |opts|
+    opts.banner = "Usage: #{$0} [options] [environment] [database.yml]"
+
+    opts.separator ""
+    opts.separator "Specific options:"
+
+
+    opts.on("-m", "--mysql [MYSQL_EXECUTABLE]", String, "Which mysql executable") do |mysql|
+      options[:mysql_bin] = mysql.to_s
+    end
+
+    opts.on("-v", "--verbose", "Verbosity") do |verbose|
+      options[:verbose] = verbose
+    end
+
+    opts.on_tail("-h", "--help", "Show this help message") do
+      puts opts
+      exit
+    end
+  end
+  option_parser.parse! ARGV
+  exec produce_command_line(ARGV, options)
 end
