@@ -32,7 +32,7 @@ require 'erb'
 module RailsGoodies
   module MySql
     def produce_command_line(argv = [], options = {})
-      options[:mysql_bin] ||= 'mysql' # default
+      options[:executable] ||= 'mysql' # default
       argv = [] if argv.nil?
       environment = argv[0] || 'development'
       config_file = argv[1] || 'config/database.yml'
@@ -50,7 +50,11 @@ module RailsGoodies
       if config['user'].nil? && (config['user'] = config['username'])
         config.delete 'username'
       end
+
       connection_opt = config.keys.sort
+      unless options[:ignore].nil?
+        connection_opt -= options[:ignore].split(/,/)
+      end
       
       connection_values = connection_opt.collect { |key| "'#{config[key]}'"}
       connection_opt.map! { |key| "#{ key }=%s"}
@@ -58,7 +62,7 @@ module RailsGoodies
       # After http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
       command_line = <<-END_BASH
       { printf '[client]\n#{connection_opt.join('\n')}' #{connection_values.join(' ')} |
-3<&0 <&4 4<&- #{options[:mysql_bin]} --defaults-file=/dev/fd/3 
+3<&0 <&4 4<&- #{options[:executable]} --defaults-file=/dev/fd/3 
 } 4<&0
        END_BASH
        $stderr.puts command_line if options[:verbose]
@@ -70,7 +74,6 @@ end
 if  __FILE__ == $0
   include RailsGoodies::MySql
   # Default options:
-  options = {:mysql_bin => 'mysql'}
   option_parser = OptionParser.new do |opts|
     opts.banner = "Usage: #{$0} [options] [environment] [database.yml]"
 
@@ -78,12 +81,16 @@ if  __FILE__ == $0
     opts.separator "Specific options:"
 
 
-    opts.on("-m", "--mysql [MYSQL_EXECUTABLE]", String, "Which mysql executable") do |mysql|
-      options[:mysql_bin] = mysql.to_s
+    opts.on("-x", "--executable EXECUTABLE", String, "(mysql) executable to use") do |mysql|
+      options[:executable] = mysql.to_s
     end
 
     opts.on("-v", "--verbose", "Verbosity") do |verbose|
       options[:verbose] = verbose
+    end
+
+    opts.on("-i", "--ignore FLAGS", "mysql flags in database.yml to ignore, comma-separated") do |ignore|
+      options[:ignore] = ignore
     end
 
     opts.on_tail("-h", "--help", "Show this help message") do
