@@ -30,29 +30,45 @@ require 'erb'
 
 module RailsGoodies
   module MySql
-    def produce_command_line(argv)
+    def produce_command_line(argv = [])
+      argv = [] if argv.nil?
       environment = argv[0] || 'development'
       config_file = argv[1] || 'config/database.yml'
-      config = nil
       
-      begin
-        config = YAML::load(ERB.new(IO.read(config_file)).result)
-      rescue Exception => e
-        raise "Could not parse config file >>#{config_file}<<. Exception >>#{e}<<"
-      end
+      yaml = YAML::load(ERB.new(IO.read(config_file)).result)
       
-      raise "Could not find configuration for >>#{environment}<< in file #{config_file}." if config[environment].nil?
+      raise "Could not find configuration for >>#{environment}<< in file #{config_file}." if !yaml || yaml[environment].nil?
       
-      config_env = config[environment]
-      adapter = config_env['adapter']
+      config = yaml[environment]
+      adapter = config['adapter']
       raise "Adapter >>#{adapter}<< not supported. Sorry." unless adapter == 'mysql'
       
-      %{mysql -h '#{adapter['host']}' -u #{adapter['username']} -p... }
+      config.delete('adapter')
+      # Rename username to user
+      if config['user'].nil? && (config['user'] = config['username'])
+        config.delete 'username'
+      end
+      connection_opt = config.keys
+      if config.keys.include? 'password'
+        connection_opt.delete_if { |opt|  opt=='password'}
+        connection_opt << 'password'
+      end
+      
+      connection_values = connection_opt.collect { |key| config[key]}
+      connection_opt.map! { |key| "#{ key }=%s"}
+
+      # After http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
+      return <<-END_BASH
+      { printf '[client]\n#{connection_opt.join('\n')}' #{connection_values.join(' ')} |
+3<&0 <&4 4<&- /usr/local/mysql/bin/mysql --defaults-file=/dev/fd/3 
+} 4<&0
+       END_BASH
     end
   end
 end
 
 if  __FILE__ == $0
   include RailsGoodies::MySql
+  puts produce_command_line(ARGV)
   exec produce_command_line(ARGV)
 end
