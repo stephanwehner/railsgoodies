@@ -12,15 +12,15 @@ class MySqlTest < Test::Unit::TestCase
   GOOD_DATABASE_YML = <<-END
 development: 
   adapter: mysql
-  database: dev_db
   username: dev_user
+  database: dev_db
   password: dev_password
   host: localhost
 other: 
   adapter: mysql
-  database: other_db
   username: other_user
   password: other_password
+  database: other_db
   host: localhost
   END
 
@@ -36,8 +36,7 @@ other:
   def test_no_args
     IO.expects(:read).returns(GOOD_DATABASE_YML)
     expected = <<-END
-{ printf '[client]
-database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'dev_db' 'localhost' 'dev_password' 'dev_user' |
+{ ruby my_sql.rb  --mycnf development config/database.yml |
 3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
 } 4<&0
     END
@@ -49,8 +48,7 @@ database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'dev_db' 'localhost' 'dev_passwor
     # Using quotes to handle
     IO.expects(:read).returns(GOOD_DATABASE_YML.sub(/password: dev_password/,'password:'))
     expected = <<-END
-{ printf '[client]
-database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'dev_db' 'localhost' '' 'dev_user' |
+{ ruby my_sql.rb  --mycnf development config/database.yml |
 3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
 } 4<&0
     END
@@ -60,8 +58,7 @@ database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'dev_db' 'localhost' '' 'dev_user
   def test_other_database
     IO.expects(:read).returns(GOOD_DATABASE_YML)
     expected = <<-END
-{ printf '[client]
-database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'other_db' 'localhost' 'other_password' 'other_user' |
+{ ruby my_sql.rb  --mycnf other config/database.yml |
 3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
 } 4<&0
     END
@@ -71,8 +68,7 @@ database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'other_db' 'localhost' 'other_pas
   def test_executable
     IO.expects(:read).returns(GOOD_DATABASE_YML)
     expected = <<-END
-{ printf '[client]
-database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'other_db' 'localhost' 'other_password' 'other_user' |
+{ ruby my_sql.rb  --mycnf other config/database.yml |
 3<&0 <&4 4<&- test_ex --defaults-file=/dev/fd/3 
 } 4<&0
     END
@@ -85,25 +81,45 @@ database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'other_db' 'localhost' 'other_pas
     yaml << '  other_opt: other_setting'
     IO.expects(:read).returns(yaml).at_least(3)
     expected = <<-END
-{ printf '[client]
-database=%s\\nencoding=%s\\nhost=%s\\nother_opt=%s\\npassword=%s\\nuser=%s' 'other_db' 'utf8' 'localhost' 'other_setting' 'other_password' 'other_user' |
+{ ruby my_sql.rb  --mycnf other config/database.yml |
 3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
 } 4<&0
     END
     assert_equal expected.strip,  produce_command_line(['other']).strip
     expected = <<-END
-{ printf '[client]
-database=%s\\nhost=%s\\nother_opt=%s\\npassword=%s\\nuser=%s' 'other_db' 'localhost' 'other_setting' 'other_password' 'other_user' |
+{ ruby my_sql.rb --ignore encoding --mycnf other config/database.yml |
 3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
 } 4<&0
     END
     assert_equal expected.strip,  produce_command_line(['other'], {:ignore=>'encoding'}).strip
     expected = <<-END
-{ printf '[client]
-database=%s\\nhost=%s\\npassword=%s\\nuser=%s' 'other_db' 'localhost' 'other_password' 'other_user' |
+{ ruby my_sql.rb --ignore encoding,other_opt --mycnf other config/database.yml |
 3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 
 } 4<&0
     END
     assert_equal expected.strip,  produce_command_line(['other'], {:ignore=>'encoding,other_opt'}).strip
+  end
+
+  def test_mycnf
+    yaml = GOOD_DATABASE_YML.dup
+    yaml << "  encoding: utf8"
+    IO.expects(:read).returns(yaml).at_least(2)
+    expected = <<-END
+[client]
+database=other_db
+encoding=utf8
+host=localhost
+password=other_password
+user=other_user
+    END
+    assert_equal expected.strip,  produce_command_line(['other'], {:mycnf=>true}).strip
+    expected = <<-END
+[client]
+database=other_db
+host=localhost
+password=other_password
+user=other_user
+    END
+    assert_equal expected.strip,  produce_command_line(['other'], {:ignore=>'encoding', :mycnf=>true}).strip
   end
 end

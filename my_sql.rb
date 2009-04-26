@@ -56,12 +56,28 @@ module RailsGoodies
         connection_opt -= options[:ignore].split(/,/)
       end
       
-      connection_values = connection_opt.collect { |key| "'#{config[key]}'"}
-      connection_opt.map! { |key| "#{ key }=%s"}
-
-      # After http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
+      if options[:mycnf]
+         client_config = connection_opt.collect do |key|
+           "#{key}=#{config[key]}"
+         end
+         return "[client]\n#{client_config.join("\n")}"
+      end
+      # At http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
+      # a comment points out to use
+      #
+      #   { printf '[client]\npassword=%s\n' xxxx |
+      #   3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 -u myuser
+      #   } 4<&0
+      #
+      # in order to switch to a mysql prompt without revealing the password
+      # within the argument list of processes.
+      #
+      # Couldn't find a mechanism to do the same within a Ruby script.
+      # So, invoke this script recursively to convert the database.yml file
+      # into a mycnf options file.
+      ignore_option = options[:ignore].nil? ? '' :  "--ignore #{options[:ignore]}"
       command_line = <<-END_BASH
-      { printf '[client]\n#{connection_opt.join('\n')}' #{connection_values.join(' ')} |
+      { ruby my_sql.rb #{ignore_option} --mycnf #{environment} #{config_file} |
 3<&0 <&4 4<&- #{options[:executable]} --defaults-file=/dev/fd/3 
 } 4<&0
        END_BASH
@@ -90,6 +106,9 @@ if  __FILE__ == $0
       options[:verbose] = verbose
     end
 
+    opts.on("--mycnf", "Output my.cnf file") do |mycnf|
+      options[:mycnf] = mycnf
+    end
     opts.on("-i", "--ignore FLAGS", "mysql flags in database.yml to ignore, comma-separated") do |ignore|
       options[:ignore] = ignore
     end
@@ -100,5 +119,10 @@ if  __FILE__ == $0
     end
   end
   option_parser.parse! ARGV
-  exec produce_command_line(ARGV, options)
+  command= produce_command_line(ARGV, options)
+  if options[:mycnf]
+    puts command
+  else
+    exec command
+  end
 end
