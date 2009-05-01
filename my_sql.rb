@@ -3,6 +3,7 @@
 require 'optparse'
 require 'yaml'
 require 'erb'
+require 'open3'
 
 # Usage
 # -----
@@ -28,10 +29,41 @@ require 'erb'
 # Result:
 #
 # They are now in a mysql prompt.
+#
+# Implementation
+# At http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
+# a comment points out this shell snippet
+#
+#   { printf '[client]\npassword=%s\n' xxxx |
+#   3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 -u myuser
+#   } 4<&0
+#
+# in order to switch to a mysql prompt without revealing the password
+# within the argument list of processes.
+#
+# In Ruby it turns out less cryptic.
 
 module RailsGoodies
   module MySql
-    def produce_command_line(argv = [], options = {})
+
+    def exec_with_fd(to_pipe, fd_assignment)
+      pipe_os, pipe_is = IO.pipe
+      pipe_is.puts(to_pipe)
+      fd_key = fd_assignment.keys.first
+      command_string = fd_assignment[fd_key]
+      raise "Bad fileno >>#{ pipe_os.fileno }<<" unless pipe_os.fileno.is_a?(Fixnum)
+      command = command_string.gsub(/:#{fd_key}/, pipe_os.fileno.to_s)
+      child_pid = fork do
+        pipe_is.close
+        exec command
+      end
+  
+      pipe_is.close
+      Process.wait
+      exit
+    end
+
+    def perform(argv = [], options = {})
       options[:executable] ||= 'mysql' # default
       argv = [] if argv.nil?
       environment = argv[0] || 'development'
@@ -56,33 +88,15 @@ module RailsGoodies
         connection_opt -= options[:ignore].split(/,/)
       end
       
-      if options[:mycnf]
-         client_config = connection_opt.collect do |key|
-           "#{key}=#{config[key]}"
-         end
-         return "[client]\n#{client_config.join("\n")}"
+      client_config = connection_opt.collect do |key|
+        "#{key}=#{config[key]}"
       end
-      # At http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
-      # a comment points out to use
-      #
-      #   { printf '[client]\npassword=%s\n' xxxx |
-      #   3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 -u myuser
-      #   } 4<&0
-      #
-      # in order to switch to a mysql prompt without revealing the password
-      # within the argument list of processes.
-      #
-      # Couldn't find a mechanism to do the same within a Ruby script.
-      # So, invoke this script recursively to convert the database.yml file
-      # into a mycnf options file.
-      ignore_option = options[:ignore].nil? ? '' :  "--ignore #{options[:ignore]}"
-      command_line = <<-END_BASH
-      { ruby my_sql.rb #{ignore_option} --mycnf #{environment} #{config_file} |
-3<&0 <&4 4<&- #{options[:executable]} --defaults-file=/dev/fd/3 
-} 4<&0
-       END_BASH
-       $stderr.puts command_line if options[:verbose]
-       command_line
+      client_config = "[client]\n#{client_config.join("\n")}"
+      if options[:mycnf]
+         puts client_config
+         return
+      end
+      exec_with_fd client_config, :fd => "#{options[:executable]} --defaults-file=/dev/fd/:fd"
     end
   end
 end
@@ -102,10 +116,6 @@ if  __FILE__ == $0
       options[:executable] = mysql.to_s
     end
 
-    opts.on("-v", "--verbose", "Verbosity") do |verbose|
-      options[:verbose] = verbose
-    end
-
     opts.on("--mycnf", "Output my.cnf file") do |mycnf|
       options[:mycnf] = mycnf
     end
@@ -119,10 +129,5 @@ if  __FILE__ == $0
     end
   end
   option_parser.parse! ARGV
-  command= produce_command_line(ARGV, options)
-  if options[:mycnf]
-    puts command
-  else
-    exec command
-  end
+  perform(ARGV, options)
 end
