@@ -46,22 +46,15 @@ require 'open3'
 module RailsGoodies
   module MySql
 
-    def exec_with_fd(to_pipe, fd_assignment)
+    def pipe_into_exec(message, command_pipe_named, fd_name)
       pipe_os, pipe_is = IO.pipe
-      pipe_is.puts(to_pipe)
-      fd_key = fd_assignment.keys.first
-      command_string = fd_assignment[fd_key]
+      pipe_is.puts(message)
       raise "Bad fileno >>#{ pipe_os.fileno }<<" unless pipe_os.fileno.is_a?(Fixnum)
-      command = command_string.gsub(/:#{fd_key}/, pipe_os.fileno.to_s)
-      child_pid = fork do
-        pipe_is.close
-        exec command
-      end
-  
-      pipe_is.close
-      Process.wait
-      exit
+      command = command_pipe_named.gsub(/#{fd_name}/, "/dev/fd/#{pipe_os.fileno.to_s}")
+      pipe_is.close # pipe_os to be closed by 'command'
+      exec command
     end
+    private :pipe_into_exec
 
     def perform(argv = [], options = {})
       options[:executable] ||= 'mysql' # default
@@ -96,7 +89,7 @@ module RailsGoodies
          puts client_config
          return
       end
-      exec_with_fd client_config, :fd => "#{options[:executable]} --defaults-file=/dev/fd/:fd"
+      pipe_into_exec client_config, "#{options[:executable]} --defaults-file=:fd", ':fd'
     end
   end
 end
