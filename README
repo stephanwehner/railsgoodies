@@ -1,0 +1,37 @@
+# Usage
+# -----
+#
+# my_sql environment config-file
+#
+# Goal
+# ----
+#
+# Developer has a shell open. The current directory is the root of a Rails application.
+# The Rails application uses a mysql database.
+#
+# Instead of opening script/console they want to connect to the mysql directly.
+# But they don't want to look up the username and password, host, port etc. from
+# the config/database.yml
+#
+# Instead they would simply type for example,
+#
+#   my_sql => opens mysql prompt with development database
+#
+#   my_sql test=> opens mysql prompt with test database
+#
+# Result:
+#
+# They are now in a mysql prompt.
+#
+# Implementation
+# At http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
+# a comment points out this shell snippet
+#
+#   { printf '[client]\npassword=%s\n' xxxx |
+#   3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 -u myuser
+#   } 4<&0
+#
+# in order to switch to a mysql prompt without revealing the password
+# within the argument list of processes.
+#
+# In Ruby it turns out less cryptic.

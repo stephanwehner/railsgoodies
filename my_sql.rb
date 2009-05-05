@@ -3,61 +3,71 @@
 require 'optparse'
 require 'yaml'
 require 'erb'
-require 'open3'
-
-# Usage
-# -----
-#
-# my_sql environment config-file
-#
-# Goal
-# ----
-#
-# Developer has a shell open. The current directory is the root of a Rails application.
-# The Rails application uses a mysql database.
-#
-# Instead of opening script/console they want to connect to the mysql directly.
-# But they don't want to look up the username and password, host, port etc. from
-# the config/database.yml
-#
-# Instead they would simply type for example,
-#
-#   my_sql => opens mysql prompt with development database
-#
-#   my_sql test=> opens mysql prompt with test database
-#
-# Result:
-#
-# They are now in a mysql prompt.
-#
-# Implementation
-# At http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
-# a comment points out this shell snippet
-#
-#   { printf '[client]\npassword=%s\n' xxxx |
-#   3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 -u myuser
-#   } 4<&0
-#
-# in order to switch to a mysql prompt without revealing the password
-# within the argument list of processes.
-#
-# In Ruby it turns out less cryptic.
 
 module RailsGoodies
-  module MySql
+  module DbPrompt
 
     def pipe_into_exec(message, command_pipe_named, fd_name)
-      pipe_os, pipe_is = IO.pipe
-      pipe_is.puts(message)
-      raise "Bad fileno >>#{ pipe_os.fileno }<<" unless pipe_os.fileno.is_a?(Fixnum)
-      command = command_pipe_named.gsub(/#{fd_name}/, "/dev/fd/#{pipe_os.fileno.to_s}")
-      pipe_is.close # pipe_os to be closed by 'command'
+      reader, writer = IO.pipe
+      writer.write(message)
+      raise "Bad fileno >>#{ reader.fileno }<<" unless reader.fileno.is_a?(Fixnum)
+      command = command_pipe_named.gsub(/#{fd_name}/, "/dev/fd/#{reader.fileno.to_s}")
+      writer.close # reader to be closed by 'command'
       exec command
     end
+    module_function :pipe_into_exec
     private :pipe_into_exec
 
-    def perform(argv = [], options = {})
-      options[:executable] ||= 'mysql' # default
+    class AbstractPrompt
+      attr_accessor :config, :options, :argv
+      def initialize(config, options, argv)
+        @config = config
+        @options = options
+        @argv = argv
+      end
+    end
+
+    class SQLITE3Prompt < AbstractPrompt
+      def run
+        options[:executable] ||= 'sqlite3' # default
+        exec "#{options[:executable]} #{config['database']}"
+      end
+    end
+
+    class POSTGRESQLPrompt < AbstractPrompt
+      def run
+        options[:executable] ||= 'psql' # default
+        exec "#{options[:executable]} #{config['database']}"
+      end
+    end
+
+    class MYSQLPrompt < AbstractPrompt
+      def run
+        options[:executable] ||= 'mysql' # default
+        config.delete('adapter')
+        # Rename username to user
+        if config['user'].nil? && (config['user'] = config['username'])
+          config.delete 'username'
+        end
+  
+        connection_opt = config.keys.sort
+        unless options[:ignore].nil?
+          connection_opt -= options[:ignore].split(/,/)
+        end
+        
+        client_config = connection_opt.collect do |key|
+          "#{key}=#{config[key]}"
+        end
+        client_config = "[client]\n#{client_config.join("\n")}"
+        if options[:mycnf]
+          puts client_config
+          return
+        end
+        RailsGoodies::DbPrompt::pipe_into_exec client_config, "#{options[:executable]} --defaults-file=:fd", ':fd'
+      end
+    end
+
+    def perform(options, argv)
       argv = [] if argv.nil?
       environment = argv[0] || 'development'
       config_file = argv[1] || 'config/database.yml'
@@ -68,34 +78,21 @@ module RailsGoodies
       
       config = yaml[environment]
       adapter = config['adapter']
-      raise "Adapter >>#{adapter}<< not supported. Sorry." unless adapter == 'mysql'
       
-      config.delete('adapter')
-      # Rename username to user
-      if config['user'].nil? && (config['user'] = config['username'])
-        config.delete 'username'
+      adapter_prompt_class = nil
+      begin
+        adapter_prompt_class = Object.module_eval("#{ adapter.upcase}Prompt")
+      rescue NameError => e
+        raise "Adapter >>#{ adapter }<< not supported."
       end
-
-      connection_opt = config.keys.sort
-      unless options[:ignore].nil?
-        connection_opt -= options[:ignore].split(/,/)
-      end
-      
-      client_config = connection_opt.collect do |key|
-        "#{key}=#{config[key]}"
-      end
-      client_config = "[client]\n#{client_config.join("\n")}"
-      if options[:mycnf]
-         puts client_config
-         return
-      end
-      pipe_into_exec client_config, "#{options[:executable]} --defaults-file=:fd", ':fd'
+      adapter_prompt = adapter_prompt_class.new(config, options, argv)
+      adapter_prompt.run
     end
+    module_function :perform
   end
 end
 
 if  __FILE__ == $0
-  include RailsGoodies::MySql
   # Default options:
   options = {}
   option_parser = OptionParser.new do |opts|
@@ -122,5 +119,5 @@ if  __FILE__ == $0
     end
   end
   option_parser.parse! ARGV
-  perform(ARGV, options)
+  RailsGoodies::DbPrompt::perform(options, ARGV)
 end
