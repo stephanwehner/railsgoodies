@@ -1,0 +1,17 @@
+1. Requirements
+
+The application consists of a single Ruby script, db_prompt.rb. There are no dependencies beyond the standard Ruby installation. These libraries are used:
+
+  * optparse
+  * yaml
+  * erb
+
+2. Installation proper
+
+Simple installation consists in saving the script, dp_prompt.rb, on the filesystem. Then invoke with 
+
+ * ruby /your/chosen/installation/path/dp_prompt.rb
+
+System-wide ordinary UNIX installation consists in saving the script under /usr/bin, /usr/local/bin, or other according to your system policy, and making it executable.
+
+When making the script executable, drop the .rb from the filename, for standard usage!

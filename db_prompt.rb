@@ -7,6 +7,8 @@ require 'erb'
 module RailsGoodies
   module DbPrompt
 
+    VERSION = '0.1'
+
     def pipe_into_exec(message, command_pipe_named, fd_name)
       reader, writer = IO.pipe
       writer.write(message)
@@ -96,7 +98,7 @@ if  __FILE__ == $0
   # Default options:
   options = {}
   option_parser = OptionParser.new do |opts|
-    opts.banner = "Usage: #{$0} [options] [environment] [database.yml]"
+    opts.banner = "Usage: #{$0} [options] [environment] [database.yml]\n"
 
     opts.separator ""
     opts.separator "Specific options:"
@@ -113,6 +115,15 @@ if  __FILE__ == $0
       options[:ignore] = ignore
     end
 
+    opts.on_tail("--version", "dp_prompt version") do |ignore|
+      puts <<ENDV
+dp_prompt version #{RailsGoodies::DbPrompt::VERSION}
+Copyright (C) 2009 Stephan Wehner
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ENDV
+      exit
+    end
     opts.on_tail("-h", "--help", "Show this help message") do
       puts opts
       exit
