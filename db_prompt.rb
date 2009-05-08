@@ -4,21 +4,10 @@ require 'optparse'
 require 'yaml'
 require 'erb'
 
-module RailsGoodies
+module RGoodies
   module DbPrompt
 
     VERSION = '0.1'
-
-    def pipe_into_exec(message, command_pipe_named, fd_name)
-      reader, writer = IO.pipe
-      writer.write(message)
-      raise "Bad fileno >>#{ reader.fileno }<<" unless reader.fileno.is_a?(Fixnum)
-      command = command_pipe_named.gsub(/#{fd_name}/, "/dev/fd/#{reader.fileno.to_s}")
-      writer.close # reader to be closed by 'command'
-      exec command
-    end
-    module_function :pipe_into_exec
-    private :pipe_into_exec
 
     class AbstractPrompt
       attr_accessor :config, :options, :argv
@@ -29,64 +18,113 @@ module RailsGoodies
       end
     end
 
-    class SQLITE3Prompt < AbstractPrompt
+    class Sqlite3Prompt < AbstractPrompt
+      # sqlite3 support is very basic : no options are passed on
+      # except for the database field
+      # The default executable is sqlite3
       def run
         options[:executable] ||= 'sqlite3' # default
-        exec "#{options[:executable]} #{config['database']}"
+        command = "#{options[:executable]} #{config['database']}"
+        $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
+        exec command
       end
     end
 
-    class POSTGRESQLPrompt < AbstractPrompt
+    class PostgresqlPrompt < AbstractPrompt
+      # postgres support is very basic : no options are passed on
+      # except for the database field (not even username, host)
+      # The default executable is psql
       def run
         options[:executable] ||= 'psql' # default
-        exec "#{options[:executable]} #{config['database']}"
+        command = "#{options[:executable]} #{config['database']}"
+        $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
+        exec command
       end
     end
 
-    class MYSQLPrompt < AbstractPrompt
-      def run
-        options[:executable] ||= 'mysql' # default
+    class MysqlPrompt < AbstractPrompt
+      # mysql support is more elaborate
+      # Username / password and other connection settings are piped in to 
+      # the mysql command (and read by mysql through the --default-config-file
+      # switch)
+      # Options set in the database.yml file can be prevented from being
+      # passed on to mysql with the --ignore option
+      # The default executable is mysql
+
+      def get_my_cnf
+        # Assemble my_cnf which are supposed to be contents of 
+        # a my.cnf with the connection options found in the database.yml
+        # file
+        
+        # 1. Don't want to pass on 'adapter'.
         config.delete('adapter')
-        # Rename username to user
+        # 2. Rename username to user
         if config['user'].nil? && (config['user'] = config['username'])
           config.delete 'username'
         end
   
+        # 3. Remove fields from options[:ignore]
         connection_opt = config.keys.sort
         unless options[:ignore].nil?
+          $stderr.puts "Ignore flags: '#{options[:ignore]}'" if options[:verbose]
           connection_opt -= options[:ignore].split(/,/)
         end
         
-        client_config = connection_opt.collect do |key|
+        # 4. make body of my.cnf
+        my_cnf = connection_opt.collect do |key|
           "#{key}=#{config[key]}"
         end
-        client_config = "[client]\n#{client_config.join("\n")}"
-        if options[:mycnf]
-          puts client_config
+        
+        # 5. Add client "header"
+        my_cnf = "[client]\n#{my_cnf.join("\n")}"
+      end
+
+
+      def run
+        options[:executable] ||= 'mysql' # default
+        my_cnf = self.get_my_cnf
+        if options[:mycnf_only]
+          puts my_cnf
           return
         end
-        RailsGoodies::DbPrompt::pipe_into_exec client_config, "#{options[:executable]} --defaults-file=:fd", ':fd'
+        $stderr.puts "Using my.cnf\n--- BEGIN my.cnf ----\n#{my_cnf}\n--- END my.cnf ---" if options[:verbose]
+        # Now set up a pipe, and hook it up to the executable (mysql)
+        reader, writer = IO.pipe
+        writer.write(my_cnf)
+        raise "Bad fileno >>#{ reader.fileno }<<" unless reader.fileno.is_a?(Fixnum)
+        # my_cnf to be read in via --defaults-file
+        command = "#{options[:executable]} --defaults-file=/dev/fd/#{reader.fileno.to_s}"
+        writer.close # reader to be closed by 'command' / the executable
+        $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
+        exec command
       end
     end
 
     def perform(options, argv)
       argv = [] if argv.nil?
       environment = argv[0] || 'development'
-      config_file = argv[1] || 'config/database.yml'
+      $stderr.puts "Using environment '#{environment}'" if options[:verbose]
+      yaml_file = argv[1] || 'config/database.yml'
+      $stderr.puts "Reading yaml file '#{yaml_file}'" if options[:verbose]
       
-      yaml = YAML::load(ERB.new(IO.read(config_file)).result)
+      yaml = YAML::load(ERB.new(IO.read(yaml_file)).result)
       
-      raise "Could not find configuration for >>#{environment}<< in file #{config_file}." if !yaml || yaml[environment].nil?
+      raise "Could not find configuration for >>#{environment}<< in file #{yaml_file}." if !yaml || yaml[environment].nil?
       
       config = yaml[environment]
       adapter = config['adapter']
       
-      adapter_prompt_class = nil
-      begin
-        adapter_prompt_class = Object.module_eval("#{ adapter.upcase}Prompt")
-      rescue NameError => e
-        raise "Adapter >>#{ adapter }<< not supported."
+      $stderr.puts "Adapter is '#{adapter}'" if options[:verbose]
+      # Convert adapter into a class
+      adapter_prompt_class = case adapter
+        when 'sqlite3': Sqlite3Prompt
+        when 'postgresql': PostgresqlPrompt
+        when 'mysql': MysqlPrompt
+        else
+          raise "Adapter >>#{ adapter }<< not supported."
       end
+
+      # Instantiate and run
       adapter_prompt = adapter_prompt_class.new(config, options, argv)
       adapter_prompt.run
     end
@@ -103,23 +141,27 @@ if  __FILE__ == $0
     opts.separator ""
     opts.separator "Specific options:"
 
-
-    opts.on("-x", "--executable EXECUTABLE", String, "(mysql) executable to use") do |mysql|
-      options[:executable] = mysql.to_s
+    opts.on("-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql") do |executable|
+      options[:executable] = executable.to_s
     end
 
-    opts.on("--mycnf", "Output my.cnf file") do |mycnf|
-      options[:mycnf] = mycnf
+    opts.on("--mycnf", "Just output my.cnf file (mysql adapter only)") do |mycnf|
+      options[:mycnf_only] = mycnf
     end
-    opts.on("-i", "--ignore FLAGS", "mysql flags in database.yml to ignore, comma-separated") do |ignore|
+
+    opts.on("-i", "--ignore FLAGS", "flags in database.yml to ignore, comma-separated (mysql adapter only)") do |ignore|
       options[:ignore] = ignore
+    end
+
+    opts.on("-v", "Verbose output") do
+      options[:verbose] = true
     end
 
     opts.on_tail("--version", "dp_prompt version") do |ignore|
       puts <<ENDV
-dp_prompt version #{RailsGoodies::DbPrompt::VERSION}
+dp_prompt version #{RGoodies::DbPrompt::VERSION}
 Copyright (C) 2009 Stephan Wehner
-This is free software; see the source for copying conditions.  There is NO
+This is free software; see the LICENSE file for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 ENDV
       exit
@@ -130,5 +172,5 @@ ENDV
     end
   end
   option_parser.parse! ARGV
-  RailsGoodies::DbPrompt::perform(options, ARGV)
+  RGoodies::DbPrompt::perform(options, ARGV)
 end
