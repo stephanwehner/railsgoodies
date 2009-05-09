@@ -79,7 +79,6 @@ module RGoodies
         my_cnf = "[client]\n#{my_cnf.join("\n")}"
       end
 
-
       def run
         options[:executable] ||= 'mysql' # default
         my_cnf = self.get_my_cnf
@@ -100,77 +99,85 @@ module RGoodies
       end
     end
 
-    def perform(options, argv)
-      argv = [] if argv.nil?
-      environment = argv[0] || 'development'
-      $stderr.puts "Using environment '#{environment}'" if options[:verbose]
-      yaml_file = argv[1] || 'config/database.yml'
-      $stderr.puts "Reading yaml file '#{yaml_file}'" if options[:verbose]
-      
-      yaml = YAML::load(ERB.new(IO.read(yaml_file)).result)
-      
-      raise "Could not find configuration for >>#{environment}<< in file #{yaml_file}." if !yaml || yaml[environment].nil?
-      
-      config = yaml[environment]
-      adapter = config['adapter']
-      
-      $stderr.puts "Adapter is '#{adapter}'" if options[:verbose]
-      # Convert adapter into a class
-      adapter_prompt_class = case adapter
-        when 'sqlite3': Sqlite3Prompt
-        when 'postgresql': PostgresqlPrompt
-        when 'mysql': MysqlPrompt
-        else
-          raise "Adapter >>#{ adapter }<< not supported."
-      end
 
-      # Instantiate and run
-      adapter_prompt = adapter_prompt_class.new(config, options, argv)
-      adapter_prompt.run
-    end
-    module_function :perform
-  end
-end
+    class CommandLineInterface < OptionParser
 
-if  __FILE__ == $0
-  # Default options:
-  options = {}
-  option_parser = OptionParser.new do |opts|
-    opts.banner = "Usage: #{$0} [options] [environment] [database.yml]\n"
+      attr_accessor :options
 
-    opts.separator ""
-    opts.separator "Specific options:"
+      def initialize
+        super
+        @options = {}
+        self.banner = "Usage: #{$0} [options] [environment] [database.yml]\n"
 
-    opts.on("-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql") do |executable|
-      options[:executable] = executable.to_s
-    end
+        separator ""
+        separator "Specific options:"
 
-    opts.on("--mycnf", "Just output my.cnf file (mysql adapter only)") do |mycnf|
-      options[:mycnf_only] = mycnf
-    end
+        def_option("-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql") do |executable|
+          @options[:executable] = executable.to_s
+        end
 
-    opts.on("-i", "--ignore FLAGS", "flags in database.yml to ignore, comma-separated (mysql adapter only)") do |ignore|
-      options[:ignore] = ignore
-    end
+        def_option("--mycnf", "Just output my.cnf file (mysql adapter only)") do
+          @options[:mycnf_only] = true
+        end
 
-    opts.on("-v", "Verbose output") do
-      options[:verbose] = true
-    end
+        def_option("-i", "--ignore FLAGS", "flags in database.yml to ignore, comma-separated (mysql adapter only)") do |ignore|
+          @options[:ignore] = ignore
+        end
 
-    opts.on_tail("--version", "dp_prompt version") do |ignore|
-      puts <<ENDV
+        def_option("-v", "--[no-]verbose", "Run verbosely") do |v|
+          @options[:verbose] = v
+        end
+
+        def_tail_option("--version", "dp_prompt version") do
+          puts <<ENDV
 dp_prompt version #{RGoodies::DbPrompt::VERSION}
 Copyright (C) 2009 Stephan Wehner
 This is free software; see the LICENSE file for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 ENDV
-      exit
-    end
-    opts.on_tail("-h", "--help", "Show this help message") do
-      puts opts
-      exit
+          exit
+        end
+
+        def_tail_option("-h", "--help", "Show this help message") do
+          puts self
+          exit
+        end
+      end
+
+      def perform(argv)
+        argv = [] if argv.nil?
+        argv = parse(argv)
+        environment = argv[0] || 'development'
+        $stderr.puts "Using environment '#{environment}'" if options[:verbose]
+        yaml_file = argv[1] || 'config/database.yml'
+        $stderr.puts "Reading yaml file '#{yaml_file}'" if options[:verbose]
+        
+        yaml = YAML::load(ERB.new(IO.read(yaml_file)).result)
+        
+        raise "Could not find configuration for >>#{environment}<< in file #{yaml_file}." if !yaml || yaml[environment].nil?
+        
+        config = yaml[environment]
+        adapter = config['adapter']
+        
+        $stderr.puts "Adapter is '#{adapter}'" if options[:verbose]
+        # Convert adapter into a class
+        adapter_prompt_class = case adapter
+          when 'sqlite3': Sqlite3Prompt
+          when 'postgresql': PostgresqlPrompt
+          when 'mysql': MysqlPrompt
+          else
+            raise "Adapter >>#{ adapter }<< not supported."
+        end
+  
+        # Instantiate and run
+        adapter_prompt = adapter_prompt_class.new(config, options, argv)
+        adapter_prompt.run
+      end
     end
   end
-  option_parser.parse! ARGV
-  RGoodies::DbPrompt::perform(options, ARGV)
+end
+
+if  __FILE__ == $0
+  cli = RGoodies::DbPrompt::CommandLineInterface.new
+  cli.perform(ARGV)
 end
