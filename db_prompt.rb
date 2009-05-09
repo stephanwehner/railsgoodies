@@ -99,35 +99,63 @@ module RGoodies
       end
     end
 
+    class ExperimentalOptionParserExtension < OptionParser
+      def self.banner(s)
+        @@banner = s
+      end
+      def self.separator(s)
+        @@separator ||= []
+        @@separator.push(s)
+      end
+      # def self.option("-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql") do |executable|
+      def self.option(*opts)
+        @@options ||= []
+        @@options.push(opts)
+      end
 
-    class CommandLineInterface < OptionParser
+      def apply_class_options_defs
+        self.banner = @@banner unless @@banner.nil?
+        @@separator.each { |sep| separator(sep)} unless @@separator.nil?
+        @@options.each do |opts|
+          # assuming opts.last is a method
+
+          m = opts.pop
+          def_option(*opts) do |*a|
+            send(m, *a)
+          end
+        end
+      end
+    end
+
+    class CommandLineInterface < ExperimentalOptionParserExtension
 
       attr_accessor :options
+      banner "Usage: #{$0} [options] [environment] [database.yml]"
 
-      def initialize
-        super
-        @options = {}
-        self.banner = "Usage: #{$0} [options] [environment] [database.yml]\n"
+      separator ""
+      separator "Specific options:"
 
-        separator ""
-        separator "Specific options:"
+      option "-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql", :executable_option
+      def executable_option(*executable)
+        @options[:executable] = executable.first.to_s
+      end
 
-        def_option("-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql") do |executable|
-          @options[:executable] = executable.to_s
-        end
+      option "--mycnf", "Just output my.cnf file (mysql adapter only)", :mysql_option
+      def mysql_option(*ignore)
+        @options[:mycnf_only] = true
+      end
 
-        def_option("--mycnf", "Just output my.cnf file (mysql adapter only)") do
-          @options[:mycnf_only] = true
-        end
+      option "-i", "--ignore FLAGS", "flags in database.yml to ignore, comma-separated (mysql adapter only)", :ignore_option
+      def ignore_option(*ignore)
+        @options[:ignore] = ignore.first
+      end
 
-        def_option("-i", "--ignore FLAGS", "flags in database.yml to ignore, comma-separated (mysql adapter only)") do |ignore|
-          @options[:ignore] = ignore
-        end
+      option "-v", "--[no-]verbose", "Run verbosely", :verbose_option
+      def verbose_option(*ignore)
+        @options[:verbose] = v
+      end
 
-        def_option("-v", "--[no-]verbose", "Run verbosely") do |v|
-          @options[:verbose] = v
-        end
-
+=begin
         def_tail_option("--version", "dp_prompt version") do
           puts <<ENDV
 dp_prompt version #{RGoodies::DbPrompt::VERSION}
@@ -142,6 +170,12 @@ ENDV
           puts self
           exit
         end
+=end
+
+      def initialize
+        super
+        @options = {}
+        apply_class_options_defs
       end
 
       def perform(argv)
