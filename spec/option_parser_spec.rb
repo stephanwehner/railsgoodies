@@ -2,73 +2,94 @@ require 'db_prompt' # what we're testing
 
 
 describe RGoodies::DbPrompt::CommandLineInterface do
-  it 'should work without any options' do
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    result = cli.parse([])
-    result.should == []
-    cli.options.should == {}
+
+  before(:each) do
+    @command_line_interface = RGoodies::DbPrompt::CommandLineInterface.new
   end
 
-  it 'should require argument for the -x option' do
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    lambda {cli.parse %w(-x)}.should raise_error(OptionParser::MissingArgument)
+  it 'should work without any options' do
+    result = @command_line_interface.parse([])
+    result.should == []
+    @command_line_interface.options.should == {}
   end
 
   it 'should translate -x option' do
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    result = cli.parse %w(-x test_ex)
+    result = @command_line_interface.parse %w(-x test_ex)
     result.should == []
-    cli.options.should == {:executable => 'test_ex'}
+    @command_line_interface.options.should == {:executable => 'test_ex'}
   end
 
   it 'should translate --executable option' do
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    result = cli.parse %w(--executable test_ex)
+    result = @command_line_interface.parse %w(--executable test_ex)
     result.should == []
-    cli.options.should == {:executable => 'test_ex'}
+    @command_line_interface.options.should == {:executable => 'test_ex'}
+  end
+
+  it 'should require an argument for the -x option' do
+    lambda {@command_line_interface.parse %w(-x)}.should raise_error(OptionParser::MissingArgument)
+  end
+
+  it 'should require an argument for the --executable option' do
+    lambda {@command_line_interface.parse %w(--executable)}.should raise_error(OptionParser::MissingArgument)
   end
 
   it 'should pass extra options for -x' do
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    result = cli.parse %w(-x test_ex extra arg)
+    result = @command_line_interface.parse %w(-x test_ex extra arg)
     result.should == ['extra',  'arg']
-    cli.options.should == {:executable => 'test_ex'}
+    @command_line_interface.options.should == {:executable => 'test_ex'}
   end
-end
   
-=begin
-  def test_mycnf_only_option
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    result = cli.parse %w(--mycnf)
-    assert_equal [], result
-    assert_equal ({:mycnf_only => true}), cli.options
+  it 'should accept --mycnf option' do
+    result = @command_line_interface.parse %w(--mycnf)
+    result.should == []
+    @command_line_interface.options.should == {:mycnf_only => true}
   end
 
-  def test_ignore_option
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    assert_raises OptionParser::MissingArgument do
-      cli.parse %w(-i)
-    end
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    result = cli.parse %w(-i a,b,c)
-    assert_equal [], result
-    assert_equal ({:ignore => 'a,b,c'}), cli.options
-    result = cli.parse %w(--ignore a,b,c,d)
-    assert_equal [], result
-    assert_equal ({:ignore => 'a,b,c,d'}), cli.options
+  it 'should accept -i option' do
+    result = @command_line_interface.parse %w(-i a,b,c)
+    result.should == []
+    @command_line_interface.options.should == {:ignore => 'a,b,c'}
+
+    result = @command_line_interface.parse %w(--ignore a,b,c,d)
+    result.should == []
+    @command_line_interface.options.should == {:ignore => 'a,b,c,d'}
   end
 
-  def test_verbose_option
-    cli = RGoodies::DbPrompt::CommandLineInterface.new
-    result = cli.parse %w(-v)
-    assert_equal [], result
-    assert_equal ({:verbose => true}), cli.options
-    result = cli.parse %w(--verbose)
-    assert_equal [], result
-    assert_equal ({:verbose => true}), cli.options
-    result = cli.parse %w(--no-verbose)
-    assert_equal [], result
-    assert_equal ({:verbose => false}), cli.options
+  it 'should require an argument for the -i option' do
+    lambda { @command_line_interface.parse %w(-i)}.should raise_error(OptionParser::MissingArgument)
+  end
+
+  it 'should accept -v option' do
+    result = @command_line_interface.parse %w(-v)
+    result.should == []
+    @command_line_interface.options.should == {:verbose => true}
+  end
+
+  it 'should accept --verbose option' do
+    result = @command_line_interface.parse %w(--verbose)
+    result.should == []
+    @command_line_interface.options.should == {:verbose => true}
+  end
+ 
+  it 'should accept --no-verbose option' do
+    result = @command_line_interface.parse %w(--no-verbose)
+    result.should == []
+    @command_line_interface.options.should == {:verbose => false}
+  end
+
+  it 'should accept --version option' do
+    @command_line_interface.should_receive(:exit).once
+    @command_line_interface.should_receive(:puts).once
+    result = @command_line_interface.parse %w(--version)
+    result.should == []
+    @command_line_interface.options.should == {}
+  end
+
+  it 'should accept --help option' do
+    @command_line_interface.should_receive(:exit).once
+    @command_line_interface.should_receive(:puts).once
+    result = @command_line_interface.parse %w(--help)
+    result.should == []
+    @command_line_interface.options.should == {}
   end
 end
-=end
