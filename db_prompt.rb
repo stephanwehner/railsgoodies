@@ -10,11 +10,10 @@ module RGoodies
     VERSION = '0.1'
 
     class AbstractPrompt
-      attr_accessor :config, :options, :argv
-      def initialize(config, options, argv)
+      attr_accessor :config, :options
+      def initialize(config, options)
         @config = config
         @options = options
-        @argv = argv
       end
     end
 
@@ -107,10 +106,15 @@ module RGoodies
         @@separator ||= []
         @@separator.push(s)
       end
-      # def self.option("-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql") do |executable|
+
       def self.option(*opts)
         @@options ||= []
         @@options.push(opts)
+      end
+
+      def self.tail_option(*opts)
+        @@tail_options ||= []
+        @@tail_options.push(opts)
       end
 
       def apply_class_options_defs
@@ -118,9 +122,18 @@ module RGoodies
         @@separator.each { |sep| separator(sep)} unless @@separator.nil?
         @@options.each do |opts|
           # assuming opts.last is a method
-
+          opts = opts.dup
           m = opts.pop
           def_option(*opts) do |*a|
+            send(m, *a)
+          end
+        end
+
+        @@tail_options.each do |opts|
+          # assuming opts.last is a method
+          opts = opts.dup
+          m = opts.pop
+          def_tail_option(*opts) do |*a|
             send(m, *a)
           end
         end
@@ -129,7 +142,7 @@ module RGoodies
 
     class CommandLineInterface < ExperimentalOptionParserExtension
 
-      attr_accessor :options
+      attr_accessor :options, :argv
       banner "Usage: #{$0} [options] [environment] [database.yml]"
 
       separator ""
@@ -141,7 +154,7 @@ module RGoodies
       end
 
       option "--mycnf", "Just output my.cnf file (mysql adapter only)", :mysql_option
-      def mysql_option(*ignore)
+      def mysql_option(*ignored_arg)
         @options[:mycnf_only] = true
       end
 
@@ -151,26 +164,27 @@ module RGoodies
       end
 
       option "-v", "--[no-]verbose", "Run verbosely", :verbose_option
-      def verbose_option(*ignore)
-        @options[:verbose] = v
+      def verbose_option(*verbose)
+        @options[:verbose] = verbose.first
       end
 
-=begin
-        def_tail_option("--version", "dp_prompt version") do
-          puts <<ENDV
+      tail_option "--version", "dp_prompt version", :version_option
+
+      def version_option(*ignored)
+        puts <<ENDV
 dp_prompt version #{RGoodies::DbPrompt::VERSION}
 Copyright (C) 2009 Stephan Wehner
 This is free software; see the LICENSE file for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 ENDV
-          exit
-        end
+        exit
+      end
 
-        def_tail_option("-h", "--help", "Show this help message") do
-          puts self
-          exit
-        end
-=end
+      tail_option "-h", "--help", "Show this help message", :help_option
+      def help_option(*ignore)
+        puts self
+        exit
+      end
 
       def initialize
         super
@@ -178,19 +192,20 @@ ENDV
         apply_class_options_defs
       end
 
-      def perform(argv)
-        argv = [] if argv.nil?
-        argv = parse(argv)
-        environment = argv[0] || 'development'
-        $stderr.puts "Using environment '#{environment}'" if options[:verbose]
-        yaml_file = argv[1] || 'config/database.yml'
-        $stderr.puts "Reading yaml file '#{yaml_file}'" if options[:verbose]
+      def parse_command_line_args(argv)
+        @argv = parse!(argv) # parse will populate options and remove the parsed options from argv
+        @environment = @argv[0] || 'development'
+        @yaml_filename = @argv[1] || 'config/database.yml'
+      end
+
+      def perform
+        $stderr.puts "Using yaml file '#{@yaml_filename}'" if options[:verbose]
+        yaml = YAML::load(ERB.new(IO.read(@yaml_filename)).result)
         
-        yaml = YAML::load(ERB.new(IO.read(yaml_file)).result)
+        $stderr.puts "Using environment '#{@environment}'" if options[:verbose]
+        raise "Could not find configuration for >>#{@environment}<< in file #{@yaml_filename}." if !yaml || yaml[@environment].nil?
         
-        raise "Could not find configuration for >>#{environment}<< in file #{yaml_file}." if !yaml || yaml[environment].nil?
-        
-        config = yaml[environment]
+        config = yaml[@environment]
         adapter = config['adapter']
         
         $stderr.puts "Adapter is '#{adapter}'" if options[:verbose]
@@ -204,7 +219,7 @@ ENDV
         end
   
         # Instantiate and run
-        adapter_prompt = adapter_prompt_class.new(config, options, argv)
+        adapter_prompt = adapter_prompt_class.new(config, options)
         adapter_prompt.run
       end
     end
@@ -213,5 +228,6 @@ end
 
 if  __FILE__ == $0
   cli = RGoodies::DbPrompt::CommandLineInterface.new
-  cli.perform(ARGV)
+  cli.parse_command_line_args(ARGV)
+  cli.perform
 end

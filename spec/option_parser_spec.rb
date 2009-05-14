@@ -119,15 +119,24 @@ other:
   password: other_password
   database: other_db
   host: localhost
+test_postgres_env:
+  adapter: postgresql
+  database: ps_test
+  pool: 5
+  timeout: 5000
+test_sqlite3_env:
+  adapter: sqlite3
+  database: test.sqlite3
+  pool: 5
+  timeout: 5000
 END_GOOD_DATABASE_YAML
 
   it 'should read yaml file' do
     @command_line_interface.parse_command_line_args []
     IO.should_receive(:read).with('config/database.yml').and_return(GOOD_DATABASE_YAML)
-    mysql_prompt_mock = mock('mysqlprompt')
-    mysql_prompt_mock.should_receive(:run)
-    expected_init_args = {"username"=>"dev_user", "adapter"=>"mysql", "host"=>"localhost", "password"=>"dev_password", "database"=>"dev_db"}, {}
-    RGoodies::DbPrompt::MysqlPrompt.should_receive(:new).with(*expected_init_args).and_return(mysql_prompt_mock)
+    prompt_mock = mock('mysqlprompt')
+    prompt_mock.should_receive(:run)
+    RGoodies::DbPrompt::MysqlPrompt.should_receive(:new).and_return(prompt_mock)
     @command_line_interface.perform
   end
 
@@ -172,6 +181,26 @@ END_GOOD_DATABASE_YAML
     mysql_prompt_mock.should_receive(:run)
     expected_init_args = {"username"=>"other_user", "adapter"=>"mysql", "host"=>"localhost", "database"=>"other_db", "password"=>"other_password"}, {:executable=>"abc"}
     RGoodies::DbPrompt::MysqlPrompt.should_receive(:new).with(*expected_init_args).and_return(mysql_prompt_mock)
+    @command_line_interface.perform
+  end
+
+  it 'should use PostgresqlPrompt' do
+    @command_line_interface.parse_command_line_args %w{ test_postgres_env }
+    IO.should_receive(:read).with('config/database.yml').and_return(GOOD_DATABASE_YAML)
+    prompt_mock = mock('postgresql prompt')
+    prompt_mock.should_receive(:run)
+    expected_init_args = {"adapter"=>"postgresql", "timeout"=>5000, "database"=>"ps_test", "pool"=>5}, {}
+    RGoodies::DbPrompt::PostgresqlPrompt.should_receive(:new).with(*expected_init_args).and_return(prompt_mock)
+    @command_line_interface.perform
+  end
+
+  it 'should use Sqlite3Prompt' do
+    @command_line_interface.parse_command_line_args %w{ test_sqlite3_env }
+    IO.should_receive(:read).with('config/database.yml').and_return(GOOD_DATABASE_YAML)
+    prompt_mock = mock('postgresql prompt')
+    prompt_mock.should_receive(:run)
+    expected_init_args = {"adapter"=>"sqlite3", "timeout"=>5000, "database"=>"test.sqlite3", "pool"=>5}, {}
+    RGoodies::DbPrompt::Sqlite3Prompt.should_receive(:new).with(*expected_init_args).and_return(prompt_mock)
     @command_line_interface.perform
   end
 end
