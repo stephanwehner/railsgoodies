@@ -14,6 +14,10 @@ module RGoodies
       def initialize(config, options)
         @config = config
         @options = options
+
+        raise 'No database name found' if config['database'].nil?
+        raise 'Database name is empty' if config['database'] == ''
+        raise 'Database name has whitespace' if config['database'] =~ /\s/
       end
     end
 
@@ -58,7 +62,9 @@ module RGoodies
         # 1. Don't want to pass on 'adapter'.
         config.delete('adapter')
         # 2. Rename username to user
-        if config['user'].nil? && (config['user'] = config['username'])
+        if config['user'].nil? &&
+           !config['username'].nil? &&
+           (config['user'] = config['username'])
           config.delete 'username'
         end
   
@@ -89,7 +95,11 @@ module RGoodies
         # Now set up a pipe, and hook it up to the executable (mysql)
         reader, writer = IO.pipe
         writer.write(my_cnf)
-        raise "Bad fileno >>#{ reader.fileno }<<" unless reader.fileno.is_a?(Fixnum)
+        unless reader.fileno.is_a?(Fixnum)
+          writer.close
+          reader.close
+          raise "Bad fileno >>#{ reader.fileno }<<" 
+        end
         # my_cnf to be read in via --defaults-file
         command = "#{options[:executable]} --defaults-file=/dev/fd/#{reader.fileno.to_s}"
         writer.close # reader to be closed by 'command' / the executable
