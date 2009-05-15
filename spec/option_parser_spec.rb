@@ -15,6 +15,12 @@ require 'db_prompt' # what we're testing
 #
 
 
+describe RGoodies::DbPrompt do
+  it 'should have a VERSION' do
+    RGoodies::DbPrompt::VERSION.should be_an_instance_of(String)
+  end
+end
+
 describe RGoodies::DbPrompt::CommandLineInterface, 'Experimental OptionParser Extensions' do
   it 'should work without any options' do
     command_line_interface = RGoodies::DbPrompt::CommandLineInterface.new
