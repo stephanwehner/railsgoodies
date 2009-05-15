@@ -12,19 +12,29 @@ Goal
 Developer has a shell open. The current directory is the root of a Rails application.
 The Rails application uses a mysql database.
 
-Instead of opening script/console they want to connect to the mysql directly.
-But they don't want to look up the username and password, host, port etc. from
-the config/database.yml
+Instead of opening script/console they want to connect to the mysql database directly. But they don't want to look up the username and password, host, port etc. from the config/database.yml
 
 Instead they would simply run these aliases, for example,
 
-   my_sql => opens mysql prompt with development database
+   my_dev => opens mysql prompt with development database
 
-   my_sql test=> opens mysql prompt with test database
+   my_test=> opens mysql prompt with test database
 
 Result:
 
- They are now in a mysql prompt.
+$ my_dev
+Reading table information for completion of table and column names
+You can turn off this feature to get a quicker startup with -A
+
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 5
+Server version: 5.1.30 MySQL Community Server (GPL)
+
+Type 'help;' or '\h' for help. Type '\c' to clear the buffer.
+
+mysql> 
+
+(They are now in a mysql prompt.)
 
 
 Databases Supported
@@ -33,3 +43,9 @@ Databases Supported
  * mysql
  * sqlite3 (no extra options)
  * postgres (no extra options)
+
+Options
+-------
+Invoke 
+
+$ ruby dp_prompt.rb --help
