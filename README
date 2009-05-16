@@ -1,16 +1,13 @@
-All of this stuff is still under construction. Expect updates!
-
-
 == Usage
 
- ruby dp_prompt.rb [environment] [yaml-file]
+ ruby rdb_prompt.rb [environment] [yaml-file]
 
-== Goal
+== Motivation
 
 Developer has a shell open. The current directory is the root of a Rails application.
 The Rails application uses a mysql database.
 
-Instead of opening script/console they want to connect to the mysql database directly. But they don't want to look up the username and password, host, port etc. from the config/database.yml
+Instead of opening script/console they want to connect to the mysql database directly. But they don't want to look up the username and password, host, port etc. from the (Rails standard) config/database.yml
 
 Instead they would simply set up and run these aliases, for example,
 
@@ -34,6 +31,7 @@ mysql>
 
 (They are now in a mysql prompt.)
 
+As you can see, the rdb_prompt script allows a kind of DRY : why repeat the database connection options if they are already in the (or a) database.yml file.
 
 == Databases Supported
 

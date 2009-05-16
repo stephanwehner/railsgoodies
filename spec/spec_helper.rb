@@ -1,4 +1,4 @@
-require 'db_prompt'
+require 'rdb_prompt'
 
 TEST_DATABASE_YAML = <<END_TEST_DATABASE_YAML
 development: 

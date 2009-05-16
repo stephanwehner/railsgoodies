@@ -5,7 +5,7 @@ require 'yaml'
 require 'erb'
 
 module RGoodies
-  module DbPrompt
+  module RdbPrompt
 
     VERSION = '0.2'
 
@@ -182,7 +182,7 @@ module RGoodies
 
       def version_option(*ignored)
         puts <<ENDV
-dp_prompt version #{RGoodies::DbPrompt::VERSION}
+dp_prompt version #{RGoodies::RdbPrompt::VERSION}
 Copyright (C) 2009 Stephan Wehner
 This is free software; see the LICENSE file for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
@@ -237,7 +237,7 @@ ENDV
 end
 
 if  __FILE__ == $0
-  cli = RGoodies::DbPrompt::CommandLineInterface.new
+  cli = RGoodies::RdbPrompt::CommandLineInterface.new
   cli.parse_command_line_args(ARGV)
   cli.perform
 end
