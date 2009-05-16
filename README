@@ -1,24 +1,22 @@
 All of this stuff is still under construction. Expect updates!
 
 
-Usage
------
+== Usage
 
  ruby dp_prompt.rb [environment] [yaml-file]
 
-Goal
-----
+== Goal
 
 Developer has a shell open. The current directory is the root of a Rails application.
 The Rails application uses a mysql database.
 
 Instead of opening script/console they want to connect to the mysql database directly. But they don't want to look up the username and password, host, port etc. from the config/database.yml
 
-Instead they would simply run these aliases, for example,
+Instead they would simply set up and run these aliases, for example,
 
-   my_dev => opens mysql prompt with development database
+   my_dev  # opens mysql prompt with development database
 
-   my_test=> opens mysql prompt with test database
+   my_test # opens mysql prompt with test database
 
 Result:
 
@@ -37,15 +35,14 @@ mysql>
 (They are now in a mysql prompt.)
 
 
-Databases Supported
--------------------
+== Databases Supported
 
  * mysql
  * sqlite3 (no extra options)
  * postgres (no extra options)
 
-Options
--------
-Invoke 
+== Options
+
+To see the available options, run
 
 $ ruby dp_prompt.rb --help

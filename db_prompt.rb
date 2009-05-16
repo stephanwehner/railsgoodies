@@ -7,7 +7,7 @@ require 'erb'
 module RGoodies
   module DbPrompt
 
-    VERSION = '0.1'
+    VERSION = '0.2'
 
     class AbstractPrompt
       attr_accessor :config, :options
