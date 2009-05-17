@@ -11,17 +11,17 @@ The Rails application uses a mysql database.
 Instead of opening script/console and using ActiveRecord or the table
 based Rails models (because it can be slow to start up and/or clumsy for
 database work) they want to connect to the mysql database directly. But
-they don't want to look up the username and password, host, port etc. from
+they don't want to look up the user name and password, host, port etc. from
 the (Rails standard) config/database.yml
 
 Using the rdb_prompt.rb script they would simply set up and run these
 aliases, for example,
 
-$ alias rdb_dev='ruby rdb_prompt.rb development'  # opens mysql prompt with development database
-$ alias rdb_test='ruby rdb_prompt.rb test'  # opens mysql prompt with test database
+$ alias rdb_dev='ruby rdb_prompt.rb development'  # opens database prompt with development database
+$ alias rdb_test='ruby rdb_prompt.rb test'  # opens database prompt with test database
 
 
-Result:
+Result (if the mysql adapter is configured in config/database.yml for the development environment):
 
 $ rdb_dev
 Reading table information for completion of table and column names
@@ -59,7 +59,7 @@ For mysql the port, host, socket, user and password are extracted from
 the database.yml file and passed on to open the mysql client.
 
 The executable (sqlite3/postgres) can be changed using the -x /
---exectutable option.
+--executable option.
 
 In particular, if the database.yml file contains different adapters
 for different environments, the (default) client corresponding to the
@@ -103,4 +103,10 @@ Specific options:
 
 == Note on optparse usage
 
-The implementation uses an experimental interface to the optparse / OptionParser class : ExperimentalOptionParserExtension. The hope is to improve on the examplusage e given at http://www.ruby-doc.org/stdlib/libdoc/optparse/rdoc/classes/OptionParser.html -- still work in progress.
+The implementation uses an experimental interface to the optparse
+/ OptionParser class : ExperimentalOptionParserExtension. The
+hope is to improve on the example usage given at
+
+  http://www.ruby-doc.org/stdlib/libdoc/optparse/rdoc/classes/OptionParser.html
+
+-- still work in progress.
