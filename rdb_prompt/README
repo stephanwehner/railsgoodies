@@ -1,23 +1,29 @@
 == Usage
 
- ruby rdb_prompt.rb [environment] [yaml-file]
+ ruby rdb_prompt.rb [environment] [YAML file]
 
 == Motivation
 
-Developer has a shell open. The current directory is the root of a Rails application.
+Rails developer or database administrator on the Rails team has a
+shell open. The current directory is the root of a Rails application.
 The Rails application uses a mysql database.
 
-Instead of opening script/console they want to connect to the mysql database directly. But they don't want to look up the username and password, host, port etc. from the (Rails standard) config/database.yml
+Instead of opening script/console and using ActiveRecord or the table
+based Rails models (because it can be slow to start up and/or clumsy for
+database work) they want to connect to the mysql database directly. But
+they don't want to look up the username and password, host, port etc. from
+the (Rails standard) config/database.yml
 
-Instead they would simply set up and run these aliases, for example,
+Using the rdb_prompt.rb script they would simply set up and run these
+aliases, for example,
 
-   my_dev  # opens mysql prompt with development database
+$ alias rdb_dev='ruby rdb_prompt.rb development'  # opens mysql prompt with development database
+$ alias rdb_test='ruby rdb_prompt.rb test'  # opens mysql prompt with test database
 
-   my_test # opens mysql prompt with test database
 
 Result:
 
-$ my_dev
+$ rdb_dev
 Reading table information for completion of table and column names
 You can turn off this feature to get a quicker startup with -A
 
@@ -31,7 +37,9 @@ mysql>
 
 (They are now in a mysql prompt.)
 
-As you can see, the rdb_prompt script allows a kind of DRY : why repeat the database connection options if they are already in the (or a) database.yml file.
+As you can see, the rdb_prompt script allows a kind of DRY : why repeat
+the database connection options if they are already in the (or a)
+database.yml file.
 
 == Databases Supported
 
@@ -39,8 +47,60 @@ As you can see, the rdb_prompt script allows a kind of DRY : why repeat the data
  * sqlite3 (no extra options)
  * postgres (no extra options)
 
+sqlite3 / postgres support is basic. The client is invoked with
+
+$ sqlite3 "database"
+$ psql "database"
+
+where the "database" is looked up from the environment
+(development/test/etc.) in the database.yml file.
+
+For mysql the port, host, socket, user and password are extracted from
+the database.yml file and passed on to open the mysql client.
+
+The executable (sqlite3/postgres) can be changed using the -x /
+--exectutable option.
+
+In particular, if the database.yml file contains different adapters
+for different environments, the (default) client corresponding to the
+adapter is invoked: more DRYness.
+
+== Note on Passwords
+
+Passwords are not exposed more than they are already through the
+database.yml file used. In the case of sqlite3 and postgresql no password
+is passed on to the client. For mysql, the mechanism implemented is
+based on the first comment to the article at
+
+ http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
+
+The comment contains this shell snippet
+
+ { printf '[client]\npassword=%s\n' xxxx |
+ 3<&0 <&4 4<&- mysql --defaults-file=/dev/fd/3 -u myuser
+ } 4<&0
+
+in order to switch to a mysql prompt without revealing the password
+within the argument list when listing processes (through ps for example).
+
 == Options
 
 To see the available options, run
 
 $ ruby dp_prompt.rb --help
+
+With Version 0.2 the output is
+
+Usage: rdb_prompt.rb [options] [environment] [database.yml]
+
+Specific options:
+    -x, --executable EXECUTABLE      executable to use. Defaults are sqlite3, psql, mysql
+        --mycnf                      Just output my.cnf file (mysql adapter only)
+    -i, --ignore FLAGS               flags in database.yml to ignore, comma-separated (mysql adapter only)
+    -v, --[no-]verbose               Run verbosely
+        --version                    dp_prompt version
+    -h, --help                       Show this help message
+
+== Note on optparse usage
+
+The implementation uses an experimental interface to the optparse / OptionParser class : ExperimentalOptionParserExtension. The hope is to improve on the examplusage e given at http://www.ruby-doc.org/stdlib/libdoc/optparse/rdoc/classes/OptionParser.html -- still work in progress.
