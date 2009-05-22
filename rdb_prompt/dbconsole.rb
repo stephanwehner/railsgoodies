@@ -4,21 +4,21 @@ require 'optparse'
 require 'yaml'
 require 'erb'
 
-class AbstractPrompt
+class AbstractConsole
   attr_accessor :db_config, :options
   def initialize(db_config, options)
     @db_config = db_config
     @options = options
 
-    raise 'No database name found' if db_config['database'].nil?
-    raise 'Database name is empty' if db_config['database'] == ''
+    abort 'No database name found' if db_config['database'].nil?
+    abort 'Database name is empty' if db_config['database'] == ''
     # Todo: deal with whitespace through quoting / escaping quotes
-    raise 'Database name has whitespace' if db_config['database'] =~ /\s/
-    raise 'Executable empty' if @options[:executable] =~ /\A\s\Z/
+    abort 'Database name has whitespace. Not supported' if db_config['database'] =~ /\s/
+    abort 'Bad executable' unless @options[:executable].nil? || @options[:executable] =~ /[a-z]/i
   end
 
-  # @options[:executable] if given
-  # otherwise find executable based on commands from PATH
+  # Returns @options[:executable] if not empty
+  # Otherwise find executable based on commands from PATH
   # adding .exe on the win32 platform
   def find_cmd(*commands)
     return @options[:executable] if @options[:executable]
@@ -32,7 +32,7 @@ class AbstractPrompt
   end
 end
 
-class SqlitePrompt < AbstractPrompt
+class SqliteConsole < AbstractConsole
   # The default executable is sqlite
   # sqlite support is very basic : no options are passed on
   # except for the database field
@@ -44,7 +44,7 @@ class SqlitePrompt < AbstractPrompt
   end
 end
 
-class Sqlite3Prompt < AbstractPrompt
+class Sqlite3Console < AbstractConsole
   # The default executable is sqlite3
   # sqlite3 support is very basic : -header option and
   # modes html, list, line, column (---mode option / @option[:mode])
@@ -59,7 +59,7 @@ class Sqlite3Prompt < AbstractPrompt
   end
 end
 
-class PostgresqlPrompt < AbstractPrompt
+class PostgresqlConsole < AbstractConsole
   # The default executable is psql
   # Environment variables for user/hos/port are set according to the database config.
   # Password is passed in environment variable PGPASSWORD with option -p / @options[:password]
@@ -75,7 +75,7 @@ class PostgresqlPrompt < AbstractPrompt
   end
 end
 
-class MysqlPrompt < AbstractPrompt
+class MysqlConsole < AbstractConsole
   # mysql support is more elaborate
   # Username / password and other connection settings are piped in to 
   # the mysql command (and read by mysql through the --default-config-file
@@ -137,6 +137,7 @@ private
         test_string = Time.new.to_s
         writer.write test_string
         writer.close
+        return false unless reader.fileno.is_a?(Fixnum)
         read_back = IO.read("/dev/fd/#{reader.fileno.to_s}") 
         if test_string == read_back
           return true
@@ -172,19 +173,20 @@ private
   
     exec find_cmd('mysql', 'mysql5'), *args
   end
+  
   # Set up a pipe, and hook it up to the executable (mysql)
+  # See http://dev.mysql.com/doc/refman/5.0/en/password-security-user.html
   def run_with_pipe
     my_cnf = get_my_cnf
     $stderr.puts "Using my.cnf\n--- BEGIN my.cnf ----\n#{my_cnf}\n--- END my.cnf ---" if options[:verbose]
     reader, writer = IO.pipe
     writer.write(my_cnf)
+    writer.close # reader to be closed by 'command' / the executable
     unless reader.fileno.is_a?(Fixnum)
-      writer.close
       reader.close
-      raise "Bad fileno >>#{ reader.fileno }<<" 
+      abort "Bad fileno >>#{ reader.fileno }<<. Cannot pipe."  # unlikely, since checked in method piping_to_dev_fd_supported?
     end
     # my_cnf to be read in via --defaults-file
-    writer.close # reader to be closed by 'command' / the executable
     command= [ find_cmd('mysql', 'mysql5'), "--defaults-file=/dev/fd/#{reader.fileno.to_s}"]
     $stderr.puts "Exec'ing command '#{ command.join ' ' }'" if options[:verbose]
     exec find_cmd('mysql', 'mysql5'), "--defaults-file=/dev/fd/#{reader.fileno.to_s}"
@@ -198,35 +200,37 @@ class CommandLineInterface < OptionParser
     @options = {}
     self.banner = "Usage: #{$0} [options] [environment] [database.yml]"
     separator ""
+    separator "Default environment is development"
+    separator "Default database.yml file is config/database.yml"
+    separator ""
     separator "Specific options:"
-    def_option "-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite3, psql, mysql" do |executable|
+    def_option "-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite, sqlite3, psql, mysql" do |executable|
       @options[:executable] = executable.to_s
     end
 
-    def_option "--mycnf", "Just output my.cnf file (mysql adapter only)" do
+    def_option "--mycnf", "mysql only: Just output my.cnf file" do
       @options[:mycnf_only] = true
     end
 
     def_option "--mode [MODE]", ['html', 'list', 'line', 'column'],
-    "Automatically put the sqlite3 database in the specified mode (html, list, l
-ine, column)." do |mode|
+    "sqlite3 only: put the database in the specified mode (html, list, line, column)" do |mode|
       @options[:mode] = mode
   end
 
-    def_option "-i", "--ignore FLAGS", "Names of flags in database.yml to ignore, comma-separated (mysql adapter only)" do |ignore|
+    def_option "-i", "--ignore FLAGS", "mysql only: Names of flags in database.yml to ignore, comma-separated" do |ignore|
       @options[:ignore] = ignore
+    end
+
+    def_option "-h", "--[no-]header", "sqlite3 only: Turn headers on or off"  do |h|
+      @options[:header] = h
+    end
+
+    def_option("-p", "--include-password", "mysql/postgresql only: Automatically provide the password from database.yml") do |v|
+      @options[:password] = true
     end
 
     def_option "-v", "--[no-]verbose", "Run verbosely" do |verbose|
       @options[:verbose] = verbose
-    end
-
-    def_option "-h", "--[no-]header", "sqlite3 : turn headers on or off"  do |h|
-      @options[:header] = h
-    end
-
-    def_option("-p", "--include-password", "Automatically provide the password from database.yml") do |v|
-      @options[:password] = true
     end
 
     def_tail_option "--help", "Show this help message" do
@@ -243,28 +247,34 @@ ine, column)." do |mode|
 
   def perform
     $stderr.puts "Using yaml file '#{@yaml_filename}'" if options[:verbose]
-    yaml = YAML::load(ERB.new(IO.read(@yaml_filename)).result)
+    abort "Cannot read file #{@yaml_filename}" unless File.readable? @yaml_filename
+    yaml = nil
+    begin
+      yaml = YAML::load(ERB.new(IO.read(@yaml_filename)).result)
+    rescue Exception => e
+      abort "Error #{e} while reading #{@yaml_filename}"
+    end
     
     $stderr.puts "Using environment '#{@environment}'" if options[:verbose]
-    raise "Could not find configuration for >>#{@environment}<< in file #{@yaml_filename}." if !yaml || yaml[@environment].nil?
+    abort "Could not find configuration for >>#{@environment}<< in file #{@yaml_filename}." unless yaml && yaml.is_a?(Hash) && yaml[@environment]
     
     db_config = yaml[@environment]
     adapter = db_config['adapter']
     
-    $stderr.puts "Adapter is '#{adapter}'" if options[:verbose]
+    $stderr.puts "Found adapter >>#{ adapter }<<" if options[:verbose]
     # Convert adapter into a class
-    adapter_prompt_class = case adapter
-      when 'sqlite': SqlitePrompt
-      when 'sqlite3': Sqlite3Prompt
-      when 'postgresql': PostgresqlPrompt
-      when 'mysql': MysqlPrompt
+    adapter_console_class = case adapter
+      when 'sqlite': SqliteConsole
+      when 'sqlite3': Sqlite3Console
+      when 'postgresql': PostgresqlConsole
+      when 'mysql': MysqlConsole
       else
-        raise  "Unknown command-line client for database #{db_config['database']}. Submit a Rails patch to add support for the #{adapter} adapter!"
+        abort  "Unknown command-line client for database #{db_config['database']}. Submit a Rails patch to add support for the #{adapter} adapter!"
     end
 
     # Instantiate and run
-    adapter_prompt = adapter_prompt_class.new(db_config, options)
-    adapter_prompt.run
+    adapter_console = adapter_console_class.new(db_config, options)
+    adapter_console.run
   end
 end
 
