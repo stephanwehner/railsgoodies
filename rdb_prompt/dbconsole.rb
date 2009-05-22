@@ -12,43 +12,66 @@ class AbstractPrompt
 
     raise 'No database name found' if db_config['database'].nil?
     raise 'Database name is empty' if db_config['database'] == ''
+    # Todo: deal with whitespace through quoting / escaping quotes
     raise 'Database name has whitespace' if db_config['database'] =~ /\s/
+    raise 'Executable empty' if @options[:executable] =~ /\A\s\Z/
+  end
+
+  # @options[:executable] if given
+  # otherwise find executable based on commands from PATH
+  # adding .exe on the win32 platform
+  def find_cmd(*commands)
+    return @options[:executable] if @options[:executable]
+    dirs_on_path = ENV['PATH'].to_s.split(File::PATH_SEPARATOR)
+    commands += commands.map{|cmd| "#{cmd}.exe"} if RUBY_PLATFORM =~ /win32/
+    commands.detect do |cmd|
+      dirs_on_path.detect do |path|
+        File.executable? File.join(path, cmd)
+      end
+    end || abort("Couldn't find database client: #{commands.join(', ')}. Check your $PATH and try again.")
+  end
+end
+
+class SqlitePrompt < AbstractPrompt
+  # The default executable is sqlite
+  # sqlite support is very basic : no options are passed on
+  # except for the database field
+  def run
+    arg = db_config['database']
+    command = "#{find_cmd('sqlite')} #{arg}"
+    $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
+    exec find_cmd('sqlite'), arg
   end
 end
 
 class Sqlite3Prompt < AbstractPrompt
-  # sqlite3 support is very basic : no options are passed on
-  # except for the database field
   # The default executable is sqlite3
+  # sqlite3 support is very basic : -header option and
+  # modes html, list, line, column (---mode option / @option[:mode])
   def run
-    options[:executable] ||= 'sqlite3' # default
     args = []
     args << "-#{@options[:mode]}" if @options[:mode]
     args << "-header" if @options[:header]
     args << db_config['database']
-    command = "#{options[:executable]} #{args.join(' ')}"
+    command = "#{find_cmd('sqlite3')} #{args.join(' ')}"
     $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
-    exec options[:executable], *args
+    exec find_cmd('sqlite3'), *args
   end
 end
 
 class PostgresqlPrompt < AbstractPrompt
-  # postgres support is very basic : no options are passed on
-  # except for the database field (not even username, host)
   # The default executable is psql
   # Environment variables for user/hos/port are set according to the database config.
   # Password is passed in environment variable PGPASSWORD with option -p / @options[:password]
   def run
-    options[:executable] ||= 'psql' # default
-
     ENV['PGUSER']     = @db_config['username'] if @db_config["username"]
     ENV['PGHOST']     = @db_config['host'] if @db_config["host"]
     ENV['PGPORT']     = @db_config['port'].to_s if @db_config["port"]
     ENV['PGPASSWORD'] = @db_config['password'].to_s if @db_config["password"] && @options[:password]
 
-    command = "#{options[:executable]} #{db_config['database']}"
+    command = "#{find_cmd('psql')} #{options[:executable]} #{db_config['database']}"
     $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
-    exec options[:executable], @db_config['database']
+    exec find_cmd('psql'), @db_config['database']
   end
 end
 
@@ -63,30 +86,15 @@ class MysqlPrompt < AbstractPrompt
 
 
   def run
-    options[:executable] ||= 'mysql' # default
-    my_cnf = get_my_cnf
     if options[:mycnf_only]
-      puts my_cnf
+      puts get_my_cnf
       return
     end
-    $stderr.puts "Using my.cnf\n--- BEGIN my.cnf ----\n#{my_cnf}\n--- END my.cnf ---" if options[:verbose]
-    # Now set up a pipe, and hook it up to the executable (mysql)
 
     if piping_to_dev_fd_supported?
-      reader, writer = IO.pipe
-      writer.write(my_cnf)
-      unless reader.fileno.is_a?(Fixnum)
-        writer.close
-        reader.close
-        raise "Bad fileno >>#{ reader.fileno }<<" 
-      end
-      # my_cnf to be read in via --defaults-file
-      command = "#{options[:executable]} --defaults-file=/dev/fd/#{reader.fileno.to_s}"
-      writer.close # reader to be closed by 'command' / the executable
-      $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
-      exec command
+      run_with_pipe
     else 
-      # todo
+      run_with_mysql_options
     end
   end
 
@@ -142,6 +150,44 @@ private
       $stderr.puts "Pipe test failed with #{e}" if options[:verbose]
       return false # more closing needed?
     end
+  end
+
+  def run_with_mysql_options
+    args = {
+      'host'      => '--host',
+      'port'      => '--port',
+      'socket'    => '--socket',
+      'username'  => '--user',
+      'encoding'  => '--default-character-set'
+    }.map { |opt, arg| "#{arg}=#{@db_config[opt]}" if @db_config[opt] }.compact
+  
+    if @db_config['password'] && @options[:password]
+      args << "--password=#{@db_config['password']}"
+    elsif @db_config['password'] && !@db_config['password'].to_s.empty?
+      args << "-p"
+    end
+  
+    args << @db_config['database']
+    $stderr.puts "Exec'ing command '#{find_cmd('mysql', 'mysql5')} #{ args.join ' ' }'" if options[:verbose]
+  
+    exec find_cmd('mysql', 'mysql5'), *args
+  end
+  # Set up a pipe, and hook it up to the executable (mysql)
+  def run_with_pipe
+    my_cnf = get_my_cnf
+    $stderr.puts "Using my.cnf\n--- BEGIN my.cnf ----\n#{my_cnf}\n--- END my.cnf ---" if options[:verbose]
+    reader, writer = IO.pipe
+    writer.write(my_cnf)
+    unless reader.fileno.is_a?(Fixnum)
+      writer.close
+      reader.close
+      raise "Bad fileno >>#{ reader.fileno }<<" 
+    end
+    # my_cnf to be read in via --defaults-file
+    writer.close # reader to be closed by 'command' / the executable
+    command= [ find_cmd('mysql', 'mysql5'), "--defaults-file=/dev/fd/#{reader.fileno.to_s}"]
+    $stderr.puts "Exec'ing command '#{ command.join ' ' }'" if options[:verbose]
+    exec find_cmd('mysql', 'mysql5'), "--defaults-file=/dev/fd/#{reader.fileno.to_s}"
   end
 end
 
@@ -208,11 +254,12 @@ ine, column)." do |mode|
     $stderr.puts "Adapter is '#{adapter}'" if options[:verbose]
     # Convert adapter into a class
     adapter_prompt_class = case adapter
+      when 'sqlite': SqlitePrompt
       when 'sqlite3': Sqlite3Prompt
       when 'postgresql': PostgresqlPrompt
       when 'mysql': MysqlPrompt
       else
-        raise  "Unknown command-line client for #{db_config['database']}. Submit a Rails patch to add support for the #{adapter} adapter!"
+        raise  "Unknown command-line client for database #{db_config['database']}. Submit a Rails patch to add support for the #{adapter} adapter!"
     end
 
     # Instantiate and run
