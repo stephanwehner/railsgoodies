@@ -1,3 +1,23 @@
+== Note
+
+Rails comes with a script
+
+  script/dbconsole
+
+that performs almost the same as rdb_prompt.
+
+The included script dbconsole.rb is a backwards-compatible replacement 
+for rails/railties/lib/commands/dbconsole.rb (with a few more options)
+
+The main difference is that the -p option is not needed for the mysql case
+on platforms that support pipes that are accessible in the filesystem
+under /dev/fd/##, such as Linux / MacOS X (For example, FreeBSD doesn't support
+/dev/fd by default for any file descriptors other than 0, 1, and 2. --
+these can be made available by mounting fdescfs on /dev/fd)
+
+Wasn't aware of script/dbconsole when writing rdb_prompt :<
+
+
 == Usage
 
  ruby rdb_prompt.rb [environment] [YAML file]
