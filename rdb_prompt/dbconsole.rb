@@ -22,9 +22,13 @@ class Sqlite3Prompt < AbstractPrompt
   # The default executable is sqlite3
   def run
     options[:executable] ||= 'sqlite3' # default
-    command = "#{options[:executable]} #{db_config['database']}"
+    args = []
+    args << "-#{@options[:mode]}" if @options[:mode]
+    args << "-header" if @options[:header]
+    args << db_config['database']
+    command = "#{options[:executable]} #{args.join(' ')}"
     $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
-    exec command
+    exec options[:executable], *args
   end
 end
 
@@ -32,11 +36,19 @@ class PostgresqlPrompt < AbstractPrompt
   # postgres support is very basic : no options are passed on
   # except for the database field (not even username, host)
   # The default executable is psql
+  # Environment variables for user/hos/port are set according to the database config.
+  # Password is passed in environment variable PGPASSWORD with option -p / @options[:password]
   def run
     options[:executable] ||= 'psql' # default
+
+    ENV['PGUSER']     = @db_config['username'] if @db_config["username"]
+    ENV['PGHOST']     = @db_config['host'] if @db_config["host"]
+    ENV['PGPORT']     = @db_config['port'].to_s if @db_config["port"]
+    ENV['PGPASSWORD'] = @db_config['password'].to_s if @db_config["password"] && @options[:password]
+
     command = "#{options[:executable]} #{db_config['database']}"
     $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
-    exec command
+    exec options[:executable], @db_config['database']
   end
 end
 
@@ -48,6 +60,37 @@ class MysqlPrompt < AbstractPrompt
   # Options set in the database.yml file can be prevented from being
   # passed on to mysql with the --ignore option
   # The default executable is mysql
+
+
+  def run
+    options[:executable] ||= 'mysql' # default
+    my_cnf = get_my_cnf
+    if options[:mycnf_only]
+      puts my_cnf
+      return
+    end
+    $stderr.puts "Using my.cnf\n--- BEGIN my.cnf ----\n#{my_cnf}\n--- END my.cnf ---" if options[:verbose]
+    # Now set up a pipe, and hook it up to the executable (mysql)
+
+    if piping_to_dev_fd_supported?
+      reader, writer = IO.pipe
+      writer.write(my_cnf)
+      unless reader.fileno.is_a?(Fixnum)
+        writer.close
+        reader.close
+        raise "Bad fileno >>#{ reader.fileno }<<" 
+      end
+      # my_cnf to be read in via --defaults-file
+      command = "#{options[:executable]} --defaults-file=/dev/fd/#{reader.fileno.to_s}"
+      writer.close # reader to be closed by 'command' / the executable
+      $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
+      exec command
+    else 
+      # todo
+    end
+  end
+
+private
 
   def get_my_cnf
     # Assemble my_cnf which are supposed to be contents of 
@@ -100,35 +143,6 @@ class MysqlPrompt < AbstractPrompt
       return false # more closing needed?
     end
   end
-  private :piping_to_dev_fd_supported?
-
-  def run
-    options[:executable] ||= 'mysql' # default
-    my_cnf = self.get_my_cnf
-    if options[:mycnf_only]
-      puts my_cnf
-      return
-    end
-    $stderr.puts "Using my.cnf\n--- BEGIN my.cnf ----\n#{my_cnf}\n--- END my.cnf ---" if options[:verbose]
-    # Now set up a pipe, and hook it up to the executable (mysql)
-
-    if piping_to_dev_fd_supported?
-      reader, writer = IO.pipe
-      writer.write(my_cnf)
-      unless reader.fileno.is_a?(Fixnum)
-        writer.close
-        reader.close
-        raise "Bad fileno >>#{ reader.fileno }<<" 
-      end
-      # my_cnf to be read in via --defaults-file
-      command = "#{options[:executable]} --defaults-file=/dev/fd/#{reader.fileno.to_s}"
-      writer.close # reader to be closed by 'command' / the executable
-      $stderr.puts "Exec'ing command '#{command}'" if options[:verbose]
-      exec command
-    else 
-      # todo
-    end
-  end
 end
 
 class CommandLineInterface < OptionParser
@@ -147,15 +161,29 @@ class CommandLineInterface < OptionParser
       @options[:mycnf_only] = true
     end
 
-    def_option "-i", "--ignore FLAGS", "flags in database.yml to ignore, comma-separated (mysql adapter only)" do |ignore|
+    def_option "--mode [MODE]", ['html', 'list', 'line', 'column'],
+    "Automatically put the sqlite3 database in the specified mode (html, list, l
+ine, column)." do |mode|
+      @options[:mode] = mode
+  end
+
+    def_option "-i", "--ignore FLAGS", "Names of flags in database.yml to ignore, comma-separated (mysql adapter only)" do |ignore|
       @options[:ignore] = ignore
     end
 
     def_option "-v", "--[no-]verbose", "Run verbosely" do |verbose|
-      @options[:verbose] = verbose.first
+      @options[:verbose] = verbose
     end
 
-    def_tail_option "-h", "--help", "Show this help message" do
+    def_option "-h", "--[no-]header", "sqlite3 : turn headers on or off"  do |h|
+      @options[:header] = h
+    end
+
+    def_option("-p", "--include-password", "Automatically provide the password from database.yml") do |v|
+      @options[:password] = true
+    end
+
+    def_tail_option "--help", "Show this help message" do
       puts self
       exit
     end
@@ -163,7 +191,7 @@ class CommandLineInterface < OptionParser
 
   def parse_command_line_args(argv)
     @argv = parse!(argv) # parse will populate options and remove the parsed options from argv
-    @environment = @argv[0] || 'development'
+    @environment = @argv[0] || ENV['RAILS_ENV'] || 'development'
     @yaml_filename = @argv[1] || 'config/database.yml'
   end
 
@@ -184,7 +212,7 @@ class CommandLineInterface < OptionParser
       when 'postgresql': PostgresqlPrompt
       when 'mysql': MysqlPrompt
       else
-        raise "Adapter >>#{ adapter }<< not supported."
+        raise  "Unknown command-line client for #{db_config['database']}. Submit a Rails patch to add support for the #{adapter} adapter!"
     end
 
     # Instantiate and run
