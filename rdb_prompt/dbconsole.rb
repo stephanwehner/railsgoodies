@@ -76,14 +76,17 @@ class PostgresqlConsole < AbstractConsole
 end
 
 class MysqlConsole < AbstractConsole
-  # mysql support is more elaborate
+
+  DATABASE_YAML_TO_MYCNF_MAP = {
+      'host'      => 'host',
+      'port'      => 'port',
+      'socket'    => 'socket',
+      'username'  => 'user',
+      'encoding'  => 'default-character-set'}
+
   # Username / password and other connection settings are piped in to 
   # the mysql command (and read by mysql through the --default-config-file
-  # switch)
-  # Options set in the database.yml file can be prevented from being
-  # passed on to mysql with the --ignore option
-  # The default executable is mysql
-
+  # switch) -- depending on operating system support
 
   def run
     if options[:mycnf_only]
@@ -101,66 +104,43 @@ class MysqlConsole < AbstractConsole
 private
 
   def get_my_cnf
-    # Assemble my_cnf which are supposed to be contents of 
-    # a my.cnf with the connection options found in the database.yml
-    # file
-    
-    # 1. Don't want to pass on 'adapter'.
-    db_config.delete('adapter')
-    # 2. Rename username to user
-    if db_config['user'].nil? &&
-       !db_config['username'].nil? &&
-       (db_config['user'] = db_config['username'])
-      db_config.delete 'username'
+    my_cnf = %w( [client] )
+    map = DATABASE_YAML_TO_MYCNF_MAP.dup
+    map['password'] = 'password'
+    # sort to allow testing
+    map.each do |yaml_name, mycnf_name|
+      my_cnf << "#{mycnf_name}=#{@db_config[yaml_name]}" if @db_config[yaml_name]
     end
-
-    # 3. Remove fields from options[:ignore]
-    connection_opt = db_config.keys.sort
-    unless options[:ignore].nil?
-      $stderr.puts "Ignore flags: '#{options[:ignore]}'" if options[:verbose]
-      connection_opt -= options[:ignore].split(/,/)
-    end
-    
-    # 4. make body of my.cnf
-    my_cnf = connection_opt.collect do |key|
-      "#{key}=#{db_config[key]}"
-    end
-    
-    # 5. Add client "header"
-    my_cnf = "[client]\n#{my_cnf.join("\n")}"
+    my_cnf.join("\n")
   end
 
   def piping_to_dev_fd_supported?
+    reader,writer = nil,nil # just so we always close
     begin
       reader, writer = IO.pipe
-      begin
-        test_string = Time.new.to_s
-        writer.write test_string
-        writer.close
-        return false unless reader.fileno.is_a?(Fixnum)
-        read_back = IO.read("/dev/fd/#{reader.fileno.to_s}") 
-        if test_string == read_back
-          return true
-        end
-        $stderr.puts "Wrote >>#{ test_string }<<, but read back >>#{ read_back }<<. Piping to /dev/fd/## is not supported" if options[:verbose]
-        return false
-      ensure
-        reader.close
+      test_string = Time.new.to_s
+      writer.write test_string
+      writer.close
+      return false unless reader.fileno.is_a?(Fixnum)
+      read_back = IO.read("/dev/fd/#{reader.fileno.to_s}") 
+      if test_string == read_back
+        return true
       end
+      $stderr.puts "Wrote >>#{ test_string }<<, but read back >>#{ read_back }<<. Piping to /dev/fd/## is not supported" if options[:verbose]
     rescue Exception => e
       $stderr.puts "Pipe test failed with #{e}" if options[:verbose]
-      return false # more closing needed?
+    ensure
+      reader.close rescue nil
+      writer.close rescue nil
     end
+    false
   end
 
   def run_with_mysql_options
-    args = {
-      'host'      => '--host',
-      'port'      => '--port',
-      'socket'    => '--socket',
-      'username'  => '--user',
-      'encoding'  => '--default-character-set'
-    }.map { |opt, arg| "#{arg}=#{@db_config[opt]}" if @db_config[opt] }.compact
+    # todo: add quotes / escaping in case of whitespace
+    args = DATABASE_YAML_TO_MYCNF_MAP.map { |yaml_name, mycnf_name|
+      "--#{mycnf_name}=#{@db_config[yaml_name]}" if @db_config[yaml_name]
+    }.compact
   
     if @db_config['password'] && @options[:password]
       args << "--password=#{@db_config['password']}"
@@ -204,6 +184,7 @@ class CommandLineInterface < OptionParser
     separator "Default database.yml file is config/database.yml"
     separator ""
     separator "Specific options:"
+
     def_option "-x", "--executable EXECUTABLE", String, "executable to use. Defaults are sqlite, sqlite3, psql, mysql" do |executable|
       @options[:executable] = executable.to_s
     end
@@ -215,10 +196,6 @@ class CommandLineInterface < OptionParser
     def_option "--mode [MODE]", ['html', 'list', 'line', 'column'],
     "sqlite3 only: put the database in the specified mode (html, list, line, column)" do |mode|
       @options[:mode] = mode
-  end
-
-    def_option "-i", "--ignore FLAGS", "mysql only: Names of flags in database.yml to ignore, comma-separated" do |ignore|
-      @options[:ignore] = ignore
     end
 
     def_option "-h", "--[no-]header", "sqlite3 only: Turn headers on or off"  do |h|
